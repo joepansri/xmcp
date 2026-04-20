@@ -149,7 +149,29 @@ def _wait_for_callback(host: str, port: int, path: str, timeout_seconds: int) ->
     return oauth_token, oauth_verifier
 
 
+def _save_oauth1_tokens_to_env(access_key: str, access_secret: str) -> None:
+    env_file = os.getenv("XMCP_ENV_FILE", ".env")
+    env_path = Path(__file__).resolve().parent / env_file
+    if not env_path.exists():
+        return
+    lines = env_path.read_text().splitlines()
+    filtered = [
+        line for line in lines
+        if not line.startswith(("X_OAUTH1_ACCESS_TOKEN=", "X_OAUTH1_ACCESS_TOKEN_SECRET="))
+    ]
+    filtered.append(f"X_OAUTH1_ACCESS_TOKEN={access_key}")
+    filtered.append(f"X_OAUTH1_ACCESS_TOKEN_SECRET={access_secret}")
+    env_path.write_text("\n".join(filtered) + "\n")
+    OAUTH_LOGGER.info("Saved OAuth1 tokens to %s", env_path.name)
+
+
 def run_oauth1_flow() -> tuple[str, str]:
+    preloaded_token = os.getenv("X_OAUTH1_ACCESS_TOKEN", "").strip()
+    preloaded_secret = os.getenv("X_OAUTH1_ACCESS_TOKEN_SECRET", "").strip()
+    if preloaded_token and preloaded_secret:
+        OAUTH_LOGGER.info("Using preloaded OAuth1 tokens from env, skipping browser consent.")
+        return preloaded_token, preloaded_secret
+
     consumer_key = os.getenv("X_OAUTH_CONSUMER_KEY")
     consumer_secret = os.getenv("X_OAUTH_CONSUMER_SECRET")
     if not consumer_key or not consumer_secret:
@@ -197,11 +219,13 @@ def run_oauth1_flow() -> tuple[str, str]:
     access_secret = access_token.get("oauth_token_secret")
     if not access_key or not access_secret:
         raise RuntimeError("Failed to obtain OAuth access token.")
+    _save_oauth1_tokens_to_env(access_key, access_secret)
     return access_key, access_secret
 
 
 def load_env() -> None:
-    env_path = Path(__file__).resolve().parent / ".env"
+    env_file = os.getenv("XMCP_ENV_FILE", ".env")
+    env_path = Path(__file__).resolve().parent / env_file
     if not env_path.exists():
         return
     try:
@@ -452,6 +476,7 @@ def create_mcp() -> FastMCP:
 
 
 def main() -> None:
+    load_env()
     host = os.getenv("MCP_HOST", "127.0.0.1")
     port = int(os.getenv("MCP_PORT", "8000"))
     mcp = create_mcp()
